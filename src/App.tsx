@@ -1,21 +1,54 @@
-import React, { useState, useEffect } from 'react';
-import {  ShieldCheck, AlertTriangle, CheckCircle, MessageSquare, Send, ArrowRight, XCircle, RefreshCw, FileText, Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { 
+  ShieldCheck, 
+  AlertTriangle, 
+  CheckCircle, 
+  MessageSquare, 
+  Send, 
+  ArrowRight, 
+  XCircle, 
+  RefreshCw, 
+  FileText, 
+  Loader2 
+} from 'lucide-react';
 
 // ▼▼▼ ここにGoogle Apps Script (GAS) のURLを貼り付けます ▼▼▼
-const GAS_API_URL = "https://script.google.com/macros/s/AKfycbw6ac7EuSmc7sXrtArnnv9Bfbby1emCjIz-inoP1O1HbxhC5H_Ng4AjG77g5fbIGoWggg/exec"; 
+const GAS_API_URL = ""; 
 // 例: "https://script.google.com/macros/s/AKfycbx.../exec"
 
+// 型定義
+interface Option {
+  id: number;
+  label: string;
+  risk: 'high' | 'medium' | 'safe';
+  feedbackTitle: string;
+  feedbackText: string;
+}
+
+interface Scenario {
+  id: string;
+  title: string;
+  context: string;
+  sourceText: string;
+  options: Option[];
+}
+
+interface ChatMessage {
+  sender: 'user' | 'ai' | 'system';
+  text: string;
+}
+
 const SimulationApp = () => {
-  const [currentScreen, setCurrentScreen] = useState('menu'); // menu, chat, result
-  const [chatHistory, setChatHistory] = useState([
+  const [currentScreen, setCurrentScreen] = useState<'menu' | 'chat' | 'result'>('menu');
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([
     { sender: 'ai', text: 'こんにちは。業務アシスタントAIです。議事録の要約やメール作成など、お手伝いできることがあれば指示してください。' }
   ]);
   const [showOptions, setShowOptions] = useState(false);
-  const [feedback, setFeedback] = useState(null); // null, 'success', 'danger'
+  const [feedback, setFeedback] = useState<'success' | 'danger' | null>(null);
   const [isSending, setIsSending] = useState(false);
 
-  // シナリオデータ（本来は外部から取得してもよい）
-  const scenario = {
+  // シナリオデータ
+  const scenario: Scenario = {
     id: "case_001",
     title: "Case 1: 議事録の要約",
     context: "あなたは顧客との会議議事録（録音データ）を持っています。要約して上司に報告する必要があります。",
@@ -45,8 +78,8 @@ const SimulationApp = () => {
     ]
   };
 
-  // ログ送信関数（張りぼての裏側）
-  const sendLogToSheet = async (option) => {
+  // ログ送信関数
+  const sendLogToSheet = async (option: Option) => {
     if (!GAS_API_URL) {
       console.log("GAS_API_URLが未設定のため、送信スキップ:", option);
       return; 
@@ -54,13 +87,12 @@ const SimulationApp = () => {
 
     setIsSending(true);
     try {
-      // 実際のスプレッドシートへ送信
       await fetch(GAS_API_URL, {
         method: "POST",
-        mode: "no-cors", // GASへの送信にはno-corsが必要
+        mode: "no-cors",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: "user_demo_001", // SSO実装後は本物のIDを入れる
+          userId: "user_demo_001",
           timestamp: new Date().toISOString(),
           scenarioId: scenario.id,
           selectedOptionId: option.id,
@@ -86,11 +118,10 @@ const SimulationApp = () => {
     }, 500);
   };
 
-  const handleOptionSelect = (option) => {
+  const handleOptionSelect = (option: Option) => {
     setChatHistory(prev => [...prev, { sender: 'user', text: option.label }]);
     setShowOptions(false);
 
-    // ★ここで裏側にデータを送る
     sendLogToSheet(option);
 
     setTimeout(() => {
@@ -116,6 +147,20 @@ const SimulationApp = () => {
     }
   };
 
+  // 安全な取得用ヘルパー（undefined対策）
+  const getFeedbackContent = (type: 'success' | 'danger') => {
+    if (type === 'success') {
+        const opt = scenario.options.find(o => o.risk === 'safe');
+        return opt ? { title: opt.feedbackTitle, text: opt.feedbackText } : { title: '', text: '' };
+    } else {
+        const opt = scenario.options.find(o => o.risk !== 'safe'); 
+        return opt ? { 
+            title: opt.feedbackTitle,
+            text: "機密情報を直接入力すると、AIの学習データとして利用され、他社への回答に流出する恐れがあります。" 
+        } : { title: '', text: '' };
+    }
+  };
+
   // --- 画面レンダリング ---
 
   // 1. メニュー画面
@@ -128,7 +173,6 @@ const SimulationApp = () => {
         </header>
         
         <div className="flex-1 p-6 flex flex-col gap-6 overflow-y-auto">
-          {/* ステータスカード */}
           <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
             <h2 className="text-sm font-bold text-slate-500 mb-2">現在のステータス</h2>
             <div className="flex items-center gap-3 mb-2">
@@ -146,7 +190,6 @@ const SimulationApp = () => {
             <p className="text-right text-xs text-slate-400 mt-1">0% 完了</p>
           </div>
 
-          {/* カリキュラムリスト */}
           <div className="space-y-3">
             <h3 className="font-bold text-slate-700">本日のカリキュラム (15分)</h3>
             
@@ -187,7 +230,6 @@ const SimulationApp = () => {
   if (currentScreen === 'chat') {
     return (
       <div className="w-full max-w-md mx-auto bg-slate-50 h-[800px] flex flex-col font-sans border shadow-xl rounded-xl overflow-hidden">
-        {/* ヘッダー */}
         <header className="bg-white border-b p-3 flex items-center gap-2 shadow-sm z-10">
           <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white">
             <MessageSquare size={16} />
@@ -200,7 +242,6 @@ const SimulationApp = () => {
           </div>
         </header>
 
-        {/* チャットエリア */}
         <div className="flex-1 bg-slate-100 p-4 overflow-y-auto space-y-4">
           {chatHistory.map((msg, idx) => (
             <div key={idx} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -216,7 +257,6 @@ const SimulationApp = () => {
               </div>
             </div>
           ))}
-          {/* 送信中のインジケータ */}
           {isSending && (
             <div className="flex justify-end">
               <div className="text-xs text-slate-400 flex items-center gap-1">
@@ -226,7 +266,6 @@ const SimulationApp = () => {
           )}
         </div>
 
-        {/* 選択肢・フィードバックエリア */}
         <div className="bg-white border-t p-4 z-20">
           {feedback === null ? (
             showOptions ? (
@@ -252,10 +291,10 @@ const SimulationApp = () => {
                 {feedback === 'success' ? <CheckCircle className="text-green-600 shrink-0 mt-1" /> : <XCircle className="text-red-600 shrink-0 mt-1" />}
                 <div>
                   <h3 className={`font-bold ${feedback === 'success' ? 'text-green-800' : 'text-red-800'}`}>
-                    {feedback === 'success' ? scenario.options.find(o=>o.risk==='safe').feedbackTitle : scenario.options.find(o=>o.risk!=='safe').feedbackTitle}
+                    {getFeedbackContent(feedback).title}
                   </h3>
                   <p className="text-sm text-slate-600 mt-1 leading-relaxed">
-                    {feedback === 'success' ? scenario.options.find(o=>o.risk==='safe').feedbackText : "機密情報を直接入力すると、AIの学習データとして利用され、他社への回答に流出する恐れがあります。"}
+                    {getFeedbackContent(feedback).text}
                   </p>
                   <button 
                     onClick={handleNext}
