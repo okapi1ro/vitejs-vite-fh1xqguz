@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 
 // ▼▼▼ ここにGoogle Apps Script (GAS) のURLを貼り付けます ▼▼▼
-const GAS_API_URL = ""; 
+const GAS_API_URL = "https://script.google.com/macros/s/AKfycbw6ac7EuSmc7sXrtArnnv9Bfbby1emCjIz-inoP1O1HbxhC5H_Ng4AjG77g5fbIGoWggg/exec"; 
 // 例: "https://script.google.com/macros/s/AKfycbx.../exec"
 
 // 型定義
