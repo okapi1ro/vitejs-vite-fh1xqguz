@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   ShieldCheck, 
   AlertTriangle, 
@@ -9,12 +9,42 @@ import {
   XCircle, 
   RefreshCw, 
   FileText, 
-  Loader2 
+  Loader2,
+  LogIn
 } from 'lucide-react';
+
+// ▼▼▼ Firebase SDKの読み込み ▼▼▼
+import { initializeApp } from "firebase/app";
+import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User } from "firebase/auth";
 
 // ▼▼▼ ここにGoogle Apps Script (GAS) のURLを貼り付けます ▼▼▼
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbw6ac7EuSmc7sXrtArnnv9Bfbby1emCjIz-inoP1O1HbxhC5H_Ng4AjG77g5fbIGoWggg/exec"; 
 // 例: "https://script.google.com/macros/s/AKfycbx.../exec"
+
+// ▼▼▼ Firebaseの設定情報（Firebaseコンソールから取得して貼り付け） ▼▼▼
+// ※StackBlitzで試す場合は、ご自身のFirebaseプロジェクトの設定値を入れてください
+const firebaseConfig = {
+  apiKey: "AIzaSyA6FFOlrxIlp_njiJayYCbRdgLpQzvQLi8",
+  authDomain: "aidrilltest.firebaseapp.com",
+  projectId: "aidrilltest",
+  storageBucket: "aidrilltest.firebasestorage.app",
+  messagingSenderId: "781365045188",
+  appId: "1:781365045188:web:b971e424e499e6dae32691",
+  measurementId: "G-MM40DYXGF3"
+};
+
+
+// Firebase初期化（設定値がない場合はエラー回避のためダミーで初期化しない）
+let auth: any;
+try {
+  // 設定値が書き換えられているかチェック
+  if (firebaseConfig.apiKey !== "YOUR_API_KEY") {
+    const app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+  }
+} catch (e) {
+  console.error("Firebase initialization error:", e);
+}
 
 // 型定義
 interface Option {
@@ -39,13 +69,59 @@ interface ChatMessage {
 }
 
 const SimulationApp = () => {
-  const [currentScreen, setCurrentScreen] = useState<'menu' | 'chat' | 'result'>('menu');
+  // ユーザー状態管理
+  const [user, setUser] = useState<User | null>(null);
+  const [loadingAuth, setLoadingAuth] = useState(true);
+  const [currentScreen, setCurrentScreen] = useState<'login' | 'menu' | 'chat' | 'result'>('login');
+  
+  // チャット状態管理
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([
     { sender: 'ai', text: 'こんにちは。業務アシスタントAIです。議事録の要約やメール作成など、お手伝いできることがあれば指示してください。' }
   ]);
   const [showOptions, setShowOptions] = useState(false);
   const [feedback, setFeedback] = useState<'success' | 'danger' | null>(null);
   const [isSending, setIsSending] = useState(false);
+
+  // ログイン状態の監視
+  useEffect(() => {
+    if (!auth) {
+      setLoadingAuth(false);
+      return;
+    }
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setLoadingAuth(false);
+      if (currentUser) {
+        setCurrentScreen('menu');
+      } else {
+        setCurrentScreen('login');
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Googleログイン処理
+  const handleLogin = async () => {
+    if (!auth) {
+      alert("Firebaseの設定が行われていません。コード内のfirebaseConfigを修正してください。");
+      return;
+    }
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+      // 成功すると onAuthStateChanged が発火して画面遷移します
+    } catch (error: any) {
+      console.error("Login failed", error);
+      alert(`ログインに失敗しました: ${error.message}`);
+    }
+  };
+
+  // ログアウト処理
+  const handleLogout = async () => {
+    if (!auth) return;
+    await signOut(auth);
+    setCurrentScreen('login');
+  };
 
   // シナリオデータ
   const scenario: Scenario = {
@@ -92,7 +168,9 @@ const SimulationApp = () => {
         mode: "no-cors",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: "user_demo_001",
+          userId: user?.uid || "unknown_user", // FirebaseのUID
+          userName: user?.displayName || "No Name", // ユーザー名
+          email: user?.email || "No Email", // メールアドレス
           timestamp: new Date().toISOString(),
           scenarioId: scenario.id,
           selectedOptionId: option.id,
@@ -163,13 +241,60 @@ const SimulationApp = () => {
 
   // --- 画面レンダリング ---
 
+  if (loadingAuth) {
+    return <div className="h-[800px] flex items-center justify-center"><Loader2 className="animate-spin text-blue-500" /></div>;
+  }
+
+  // 0. ログイン画面
+  if (currentScreen === 'login') {
+    return (
+      <div className="w-full max-w-md mx-auto bg-slate-50 h-[800px] flex flex-col font-sans border shadow-xl rounded-xl overflow-hidden items-center justify-center p-6">
+        <div className="w-24 h-24 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 mb-6">
+          <ShieldCheck size={48} />
+        </div>
+        <h1 className="text-2xl font-bold text-slate-800 mb-2">AIドライビングスクール</h1>
+        <p className="text-slate-500 text-center mb-8">
+          全社員向けAIリテラシー・マナー研修<br/>
+          （所要時間：約15分）
+        </p>
+        
+        {/* Googleログインボタン */}
+        <button 
+          onClick={handleLogin}
+          className="w-full bg-white border border-slate-300 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 shadow-sm mb-3"
+        >
+          <svg className="w-5 h-5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+          </svg>
+          Googleアカウントでログイン
+        </button>
+
+        {/* 開発中用のデバッグボタン */}
+        <button 
+          onClick={() => setCurrentScreen('menu')}
+          className="text-xs text-slate-400 mt-4 underline hover:text-slate-600"
+        >
+          [デバッグ用] ログインせずに進む
+        </button>
+      </div>
+    );
+  }
+
   // 1. メニュー画面
   if (currentScreen === 'menu') {
     return (
       <div className="w-full max-w-md mx-auto bg-slate-50 h-[800px] flex flex-col font-sans border shadow-xl rounded-xl overflow-hidden">
-        <header className="bg-blue-600 text-white p-4 text-center shadow-md">
-          <h1 className="font-bold text-lg">AIドライビングスクール</h1>
-          <p className="text-xs opacity-80">Season 1: 基礎防衛編</p>
+        <header className="bg-blue-600 text-white p-4 flex justify-between items-center shadow-md">
+          <div>
+            <h1 className="font-bold text-lg">AI Talent OS</h1>
+            <p className="text-xs opacity-80">Welcome, {user?.displayName || "Guest User"}</p>
+          </div>
+          <button onClick={handleLogout} className="text-xs bg-blue-700 px-2 py-1 rounded hover:bg-blue-800 flex items-center gap-1">
+            <LogIn size={12} /> ログアウト
+          </button>
         </header>
         
         <div className="flex-1 p-6 flex flex-col gap-6 overflow-y-auto">
@@ -217,10 +342,6 @@ const SimulationApp = () => {
               <div className="font-bold text-slate-800">著作権と生成物の利用</div>
             </div>
           </div>
-        </div>
-        
-        <div className="p-4 bg-white border-t text-center text-xs text-slate-400">
-           ExaWizards AI Talent OS v1.0
         </div>
       </div>
     );
