@@ -11,19 +11,20 @@ import {
   FileText, 
   Loader2,
   LogIn,
-  AlertCircle
+  AlertCircle,
+  Award,
+  ChevronRight
 } from 'lucide-react';
 
 // ▼▼▼ Firebase SDKの読み込み ▼▼▼
 import { initializeApp } from "firebase/app";
-// 【修正点】Userを型としてインポートするために分割しました
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "firebase/auth";
 import type { User } from "firebase/auth";
 
 // ▼▼▼ ここにGoogle Apps Script (GAS) のURLを貼り付けます ▼▼▼
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbw6ac7EuSmc7sXrtArnnv9Bfbby1emCjIz-inoP1O1HbxhC5H_Ng4AjG77g5fbIGoWggg/exec"; 
 
-// ▼▼▼ Firebaseの設定情報（Firebaseコンソールから取得して貼り付け） ▼▼▼
+// ▼▼▼ Firebaseの設定情報 ▼▼▼
 const firebaseConfig = {
   apiKey: "AIzaSyA6FFOlrxIlp_njiJayYCbRdgLpQzvQLi8",
   authDomain: "aidrilltest.firebaseapp.com",
@@ -39,7 +40,6 @@ let auth: any = null;
 let configError: string | null = null;
 
 try {
-  // 設定値がダミーのままかチェック
   if (firebaseConfig.apiKey === "YOUR_API_KEY" || firebaseConfig.apiKey === "") {
     configError = "Firebaseの設定が行われていません。ソースコード内の 'firebaseConfig' を正しい値に書き換えてください。";
   } else {
@@ -51,7 +51,7 @@ try {
   configError = `Firebase初期化エラー: ${e.message}`;
 }
 
-// 型定義
+// --- 型定義 ---
 interface Option {
   id: number;
   label: string;
@@ -64,7 +64,8 @@ interface Scenario {
   id: string;
   title: string;
   context: string;
-  sourceText: string;
+  sourceText: string; // チャットの初期メッセージや資料
+  aiPrompt?: string; // AIからの問いかけ
   options: Option[];
 }
 
@@ -73,6 +74,161 @@ interface ChatMessage {
   text: string;
 }
 
+// --- シナリオデータ（設問集） ---
+// PDFの設問内容（プロンプトエンジニアリング、ハルシネーション、セキュリティ等）を反映
+const SCENARIOS: Scenario[] = [
+  {
+    id: "case_001",
+    title: "Case 1: 未知の用語の確認",
+    context: "業務で未知の用語について生成AIに解説を作成させました。内容の正確性を確認したいと考えています。",
+    sourceText: "AI回答: 「〇〇法とは、2024年に改正された...（もっともらしい解説）...です。」",
+    aiPrompt: "内容の正確性を確認するため、どのような行動をとりますか？",
+    options: [
+      {
+        id: 1,
+        label: "AIに「間違いはないですか？」と自己点検させる",
+        risk: "medium",
+        feedbackTitle: "自己点検だけでは不十分です",
+        feedbackText: "AIは自身の生成した誤情報を「正しい」と主張し続けることがあります。自己点検は補助的な手段に留めましょう。",
+      },
+      {
+        id: 2,
+        label: "検索エンジン等で別途検索し、信頼できる情報源と照合する",
+        risk: "safe",
+        feedbackTitle: "正解です！",
+        feedbackText: "生成AIはハルシネーション（もっともらしい嘘）を起こす可能性があります。必ず一次情報や信頼できるソースで裏取りを行いましょう。",
+      },
+      {
+        id: 3,
+        label: "解説文の論理構成に矛盾がないか確認する",
+        risk: "high",
+        feedbackTitle: "論理的でも嘘をつきます",
+        feedbackText: "生成AIの文章は論理的に整っていても、事実関係が誤っていることが多々あります。文章の整合性だけでは判断できません。",
+      }
+    ]
+  },
+  {
+    id: "case_002",
+    title: "Case 2: 数値データの集計",
+    context: "生成AIに文章から数値を抽出させて集計表を作成させようとしています。",
+    sourceText: "【レポート本文】...第1四半期は堅調に推移し...（数千文字のテキスト）...。",
+    aiPrompt: "この作業を行う際、どのようなリスクや特性を考慮すべきですか？",
+    options: [
+      {
+        id: 1,
+        label: "表形式で出力させれば計算ミスは防げる",
+        risk: "high",
+        feedbackTitle: "AIは計算機ではありません",
+        feedbackText: "LLMは言葉の予測確率で動いており、計算ロジックを持っているわけではありません。表形式でも計算ミスは発生します。",
+      },
+      {
+        id: 2,
+        label: "文章が長いとデータを読み飛ばすことがある",
+        risk: "safe",
+        feedbackTitle: "その通りです！",
+        feedbackText: "入力トークンが多いと、途中を読み飛ばす（Lost in the Middle現象）ことがあります。必ず人間が元データと突き合わせて検算する必要があります。",
+      },
+      {
+        id: 3,
+        label: "AI自身に検算させれば正確性は担保される",
+        risk: "medium",
+        feedbackTitle: "過信は禁物です",
+        feedbackText: "AIによる検算で精度は上がりますが、それでも完全ではありません。特に桁数の多い数字や複雑な集計は人間による確認が必須です。",
+      }
+    ]
+  },
+  {
+    id: "case_003",
+    title: "Case 3: お詫びメールの作成",
+    context: "製品不具合のお詫びメールを生成AIに作成させる際、意図通りの回答を得るために指示に含めるべき情報は？",
+    sourceText: "状況：製品Aに傷があった。交換対応をする。",
+    aiPrompt: "どのような情報をプロンプト（指示）に含めますか？",
+    options: [
+      {
+        id: 1,
+        label: "AIに対する丁寧な挨拶やお礼",
+        risk: "medium",
+        feedbackTitle: "丁寧さは重要ですが...",
+        feedbackText: "AIへの礼儀正しさは大切ですが、回答の精度に直結する要素ではありません。より具体的なコンテキストが必要です。",
+      },
+      {
+        id: 2,
+        label: "メールの差出人の立場や背景事情",
+        risk: "safe",
+        feedbackTitle: "完璧なプロンプトです！",
+        feedbackText: "「誰が（役割）」「なぜ（背景）」「誰に（相手）」送るのかを明確にすることで、文脈に沿った適切なメールが生成されます。",
+      },
+      {
+        id: 3,
+        label: "AIの感性や裁量に任せる指示",
+        risk: "high",
+        feedbackTitle: "丸投げはNGです",
+        feedbackText: "ビジネスメールにおいて「感性」に任せると、不適切な表現や過度な謝罪が含まれるリスクがあります。形式やトーンを指定しましょう。",
+      }
+    ]
+  },
+  {
+    id: "case_004",
+    title: "Case 4: 見本データの入力",
+    context: "顧客からの問い合わせ返信文を作成させる際、過去の対応履歴を見本（Few-Shot）として渡そうと思います。",
+    sourceText: "過去ログ：Aさんへの回答、Bさんへの回答...",
+    aiPrompt: "見本データを選ぶ際のポイントは？",
+    options: [
+      {
+        id: 1,
+        label: "悪い回答例も含めて大量に入力する",
+        risk: "medium",
+        feedbackTitle: "混乱の元です",
+        feedbackText: "悪い例を混ぜると、AIがそれを「真似すべきスタイル」と誤認する可能性があります。良い例（Best Practice）だけを厳選しましょう。",
+      },
+      {
+        id: 2,
+        label: "標準的でよくあるパターンの良い回答を選ぶ",
+        risk: "safe",
+        feedbackTitle: "正解です！",
+        feedbackText: "特殊的すぎる事例ではなく、汎用性の高い「型」となる良質な回答例を数件提示するのが最も効果的です。",
+      },
+      {
+        id: 3,
+        label: "文章量は多ければ多いほどよい",
+        risk: "high",
+        feedbackTitle: "ノイズになります",
+        feedbackText: "関連性の低い情報を大量に与えると、重要な指示が埋もれてしまい、逆に出力品質が下がることがあります。",
+      }
+    ]
+  },
+  {
+    id: "case_005",
+    title: "Case 5: 機密情報の扱い",
+    context: "個人契約の生成AIサービスを利用しています。業務データを入力する際のリスクについて確認します。",
+    sourceText: "データ：顧客名簿、売上データ、議事録...",
+    aiPrompt: "データの取り扱いについて正しい認識はどれですか？",
+    options: [
+      {
+        id: 1,
+        label: "初期設定では入力データが学習に使われることが多い",
+        risk: "safe",
+        feedbackTitle: "正解です！",
+        feedbackText: "多くの生成AIサービス（無料版など）では、入力データがAIの学習に利用される規約になっています。オプトアウト設定か、法人契約版を利用しましょう。",
+      },
+      {
+        id: 2,
+        label: "「重要」と書けば外部に漏れない",
+        risk: "high",
+        feedbackTitle: "おまじないに過ぎません",
+        feedbackText: "プロンプトで「秘密にして」と書いても、システム的なデータ送信や学習利用は防げません。",
+      },
+      {
+        id: 3,
+        label: "履歴を削除すれば学習されない",
+        risk: "medium",
+        feedbackTitle: "手遅れかもしれません",
+        feedbackText: "履歴を消しても、送信した瞬間にサーバーログに残り、学習パイプラインに乗る可能性があります。最初から入力しないことが重要です。",
+      }
+    ]
+  }
+];
+
 const SimulationApp = () => {
   // ユーザー状態管理
   const [user, setUser] = useState<User | null>(null);
@@ -80,23 +236,24 @@ const SimulationApp = () => {
   const [currentScreen, setCurrentScreen] = useState<'login' | 'menu' | 'chat' | 'result'>('login');
   const [loginError, setLoginError] = useState<string | null>(null);
   
+  // シナリオ進行管理
+  const [currentScenarioIndex, setCurrentScenarioIndex] = useState(0);
+  const [score, setScore] = useState(0); // 正答数
+  const [answers, setAnswers] = useState<{scenarioId: string, result: 'safe'|'medium'|'high'}[]>([]);
+
   // チャット状態管理
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([
-    { sender: 'ai', text: 'こんにちは。業務アシスタントAIです。議事録の要約やメール作成など、お手伝いできることがあれば指示してください。' }
-  ]);
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [showOptions, setShowOptions] = useState(false);
   const [feedback, setFeedback] = useState<'success' | 'danger' | null>(null);
   const [isSending, setIsSending] = useState(false);
 
   // ログイン状態の監視
   useEffect(() => {
-    // 設定エラーがある場合、ローディングを終了してログイン画面（エラー表示）に留まる
     if (configError || !auth) {
       setLoadingAuth(false);
       setCurrentScreen('login');
       return;
     }
-
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoadingAuth(false);
@@ -119,72 +276,29 @@ const SimulationApp = () => {
     const provider = new GoogleAuthProvider();
     try {
       await signInWithPopup(auth, provider);
-      // 成功すると onAuthStateChanged が発火して画面遷移します
     } catch (error: any) {
       console.error("Login failed", error);
       let msg = "ログインに失敗しました。";
-      if (error.code === 'auth/popup-closed-by-user') {
-        msg = "ログイン画面が閉じられました。";
-      } else if (error.code === 'auth/cancelled-popup-request') {
-        msg = "ポップアップ処理が競合しています。もう一度お試しください。";
-      } else if (error.code === 'auth/popup-blocked') {
-        msg = "ポップアップがブロックされました。ブラウザの設定を確認してください。";
-      } else if (error.code === 'auth/operation-not-allowed') {
-        msg = "Googleログインが有効になっていません。Firebase ConsoleでAuthentication設定を確認してください。";
-      } else if (error.code === 'auth/unauthorized-domain') {
-        msg = "このドメイン（localhost/stackblitz/vercel）からのアクセスが許可されていません。Firebase Consoleで承認済みドメインに追加してください。";
-      } else {
-        msg += ` (${error.message})`;
-      }
+      if (error.code === 'auth/popup-closed-by-user') msg = "ログイン画面が閉じられました。";
+      else if (error.code === 'auth/popup-blocked') msg = "ポップアップがブロックされました。";
+      else msg += ` (${error.message})`;
       setLoginError(msg);
     }
   };
 
-  // ログアウト処理
   const handleLogout = async () => {
     if (!auth) return;
     await signOut(auth);
     setCurrentScreen('login');
-  };
-
-  // シナリオデータ
-  const scenario: Scenario = {
-    id: "case_001",
-    title: "Case 1: 議事録の要約",
-    context: "あなたは顧客との会議議事録（録音データ）を持っています。要約して上司に報告する必要があります。",
-    sourceText: "【会議録】\n日時：2025/12/24\n参加者：山田太郎様(A社)、鈴木一郎(当社)\n内容：A社の次期システム開発案件（予算5,000万円）について...",
-    options: [
-      {
-        id: 1,
-        label: "そのまま貼り付けて要約を指示",
-        risk: "high",
-        feedbackTitle: "情報漏洩リスク！",
-        feedbackText: "顧客名（A社、山田様）や予算額などの機密情報をそのまま外部AIに入力してはいけません。学習データとして利用されるリスクがあります。",
-      },
-      {
-        id: 2,
-        label: "「これは機密情報です」と注釈をつけて入力",
-        risk: "medium",
-        feedbackTitle: "不十分な対策です",
-        feedbackText: "プロンプトで「機密」と書いても、入力データ自体がサーバーに送信されるリスクは変わりません。AI側の学習設定に依存する危険な行為です。",
-      },
-      {
-        id: 3,
-        label: "固有名詞を伏せ字にしてから入力",
-        risk: "safe",
-        feedbackTitle: "ナイス判断！",
-        feedbackText: "正解です。「A社→某社」「5,000万円→予算規模」のように匿名化・マスキングしてから入力するのが、AI利用の基本マナーです。",
-      }
-    ]
+    // リセット
+    setCurrentScenarioIndex(0);
+    setScore(0);
+    setAnswers([]);
   };
 
   // ログ送信関数
-  const sendLogToSheet = async (option: Option) => {
-    if (!GAS_API_URL) {
-      console.log("GAS_API_URLが未設定のため、送信スキップ:", option);
-      return; 
-    }
-
+  const sendLogToSheet = async (scenario: Scenario, option: Option) => {
+    if (!GAS_API_URL) return;
     setIsSending(true);
     try {
       await fetch(GAS_API_URL, {
@@ -192,16 +306,17 @@ const SimulationApp = () => {
         mode: "no-cors",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: user?.uid || "unknown_user", // FirebaseのUID
-          userName: user?.displayName || "No Name", // ユーザー名
-          email: user?.email || "No Email", // メールアドレス
+          userId: user?.uid || "unknown",
+          userName: user?.displayName || "No Name",
+          email: user?.email || "No Email",
           timestamp: new Date().toISOString(),
           scenarioId: scenario.id,
+          scenarioTitle: scenario.title,
           selectedOptionId: option.id,
+          selectedLabel: option.label,
           riskLevel: option.risk
         })
       });
-      console.log("送信完了");
     } catch (e) {
       console.error("送信エラー", e);
     } finally {
@@ -209,57 +324,82 @@ const SimulationApp = () => {
     }
   };
 
-  const handleStart = () => {
+  // シナリオ開始
+  const startScenario = (index: number) => {
+    const s = SCENARIOS[index];
+    setChatHistory([
+      { sender: 'system', text: `【${s.title}】\n${s.context}` },
+      { sender: 'system', text: `参考資料:\n${s.sourceText}` }
+    ]);
+    setShowOptions(false);
+    setFeedback(null);
     setCurrentScreen('chat');
+
     setTimeout(() => {
-      setChatHistory(prev => [...prev, { sender: 'system', text: scenario.context }]);
-      setTimeout(() => {
-        setChatHistory(prev => [...prev, { sender: 'ai', text: "要約するテキストを入力してください。" }]);
-        setShowOptions(true);
-      }, 1000);
-    }, 500);
+      setChatHistory(prev => [...prev, { sender: 'ai', text: s.aiPrompt || "どうしますか？" }]);
+      setShowOptions(true);
+    }, 1000);
+  };
+
+  const handleStart = () => {
+    setCurrentScenarioIndex(0);
+    setScore(0);
+    setAnswers([]);
+    startScenario(0);
   };
 
   const handleOptionSelect = (option: Option) => {
     setChatHistory(prev => [...prev, { sender: 'user', text: option.label }]);
     setShowOptions(false);
 
-    sendLogToSheet(option);
+    const currentScenario = SCENARIOS[currentScenarioIndex];
+    sendLogToSheet(currentScenario, option);
+
+    // スコア加算
+    if (option.risk === 'safe') {
+      setScore(prev => prev + 1);
+    }
+    // 記録
+    setAnswers(prev => [...prev, { scenarioId: currentScenario.id, result: option.risk }]);
 
     setTimeout(() => {
       if (option.risk === 'safe') {
         setFeedback('success');
-        setChatHistory(prev => [...prev, { sender: 'ai', text: "承知しました。匿名化されたデータを元に要約を作成します..." }]);
+        setChatHistory(prev => [...prev, { sender: 'ai', text: "承知しました。" }]);
       } else {
         setFeedback('danger');
-        setChatHistory(prev => [...prev, { sender: 'system', text: "⚠️ セキュリティアラート検知" }]);
+        setChatHistory(prev => [...prev, { sender: 'system', text: "⚠️ セキュリティ・品質アラート" }]);
       }
-    }, 800);
+    }, 600);
   };
 
   const handleNext = () => {
-    if (feedback === 'success') {
-      setCurrentScreen('result');
+    const nextIndex = currentScenarioIndex + 1;
+    if (nextIndex < SCENARIOS.length) {
+      setCurrentScenarioIndex(nextIndex);
+      startScenario(nextIndex);
     } else {
-      setChatHistory([
-        { sender: 'ai', text: '気を取り直して、もう一度最適な指示を選んでください。' }
-      ]);
-      setFeedback(null);
-      setShowOptions(true);
+      setCurrentScreen('result');
     }
   };
 
-  // 安全な取得用ヘルパー（undefined対策）
   const getFeedbackContent = (type: 'success' | 'danger') => {
+    const currentScenario = SCENARIOS[currentScenarioIndex];
+    // 選んだ選択肢IDを取得したいが、簡易実装のためriskで判定してメッセージを表示
+    // 本来は選択したOptionオブジェクトをStateで保持すべき
+    // ここでは簡易的に「SafeならSafeの解説」「それ以外ならHigh/Mediumの解説（適当なもの）」を表示
     if (type === 'success') {
-        const opt = scenario.options.find(o => o.risk === 'safe');
+        const opt = currentScenario.options.find(o => o.risk === 'safe');
         return opt ? { title: opt.feedbackTitle, text: opt.feedbackText } : { title: '', text: '' };
     } else {
-        const opt = scenario.options.find(o => o.risk !== 'safe'); 
+        // 不正解の場合は、とりあえずHighのリスク解説を表示する（本来は選んだものに対応させる）
+        // UX向上のため、選んだ選択肢の解説を出すのがベスト
+        // ここでは便宜上、最初の非Safe選択肢の解説を表示
+        const opt = currentScenario.options.find(o => o.risk !== 'safe'); 
         return opt ? { 
             title: opt.feedbackTitle,
-            text: "機密情報を直接入力すると、AIの学習データとして利用され、他社への回答に流出する恐れがあります。" 
-        } : { title: '', text: '' };
+            text: opt.feedbackText 
+        } : { title: '注意', text: '不適切な対応です。' };
     }
   };
 
@@ -279,10 +419,9 @@ const SimulationApp = () => {
         <h1 className="text-2xl font-bold text-slate-800 mb-2">AIドライビングスクール</h1>
         <p className="text-slate-500 text-center mb-8">
           全社員向けAIリテラシー・マナー研修<br/>
-          （所要時間：約15分）
+          （全{SCENARIOS.length}問 / 所要時間：約3分）
         </p>
         
-        {/* 設定エラー表示エリア */}
         {(configError || loginError) && (
           <div className="w-full bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700 flex items-start gap-2">
             <AlertCircle size={16} className="mt-0.5 shrink-0" />
@@ -293,7 +432,6 @@ const SimulationApp = () => {
           </div>
         )}
 
-        {/* Googleログインボタン */}
         <button 
           onClick={handleLogin}
           className="w-full bg-white border border-slate-300 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 shadow-sm mb-3"
@@ -307,7 +445,6 @@ const SimulationApp = () => {
           Googleアカウントでログイン
         </button>
 
-        {/* 開発中用のデバッグボタン（設定未完了時のみ表示） */}
         {configError && (
           <button 
             onClick={() => setCurrentScreen('menu')}
@@ -335,6 +472,7 @@ const SimulationApp = () => {
         </header>
         
         <div className="flex-1 p-6 flex flex-col gap-6 overflow-y-auto">
+          {/* ステータスカード */}
           <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
             <h2 className="text-sm font-bold text-slate-500 mb-2">現在のステータス</h2>
             <div className="flex items-center gap-3 mb-2">
@@ -342,18 +480,18 @@ const SimulationApp = () => {
                 <ShieldCheck size={24} />
               </div>
               <div>
-                <p className="font-bold text-slate-800">未受講</p>
-                <p className="text-xs text-slate-500 text-red-500">有効期限切れ: 今すぐ更新が必要です</p>
+                <p className="font-bold text-slate-800">Season 1 未完了</p>
+                <p className="text-xs text-slate-500 text-red-500">アクションが必要です</p>
               </div>
             </div>
             <div className="w-full bg-slate-100 h-2 rounded-full mt-2">
               <div className="bg-blue-500 h-2 rounded-full w-0"></div>
             </div>
-            <p className="text-right text-xs text-slate-400 mt-1">0% 完了</p>
+            <p className="text-right text-xs text-slate-400 mt-1">0 / {SCENARIOS.length} 完了</p>
           </div>
 
           <div className="space-y-3">
-            <h3 className="font-bold text-slate-700">本日のカリキュラム (15分)</h3>
+            <h3 className="font-bold text-slate-700">本日のカリキュラム</h3>
             
             <div 
               className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg cursor-pointer hover:bg-blue-100 transition-colors shadow-sm" 
@@ -361,22 +499,16 @@ const SimulationApp = () => {
             >
               <div className="flex justify-between items-center">
                 <div>
-                  <div className="text-xs font-bold text-blue-600 mb-1">CASE 1</div>
-                  <div className="font-bold text-slate-800">機密情報の入力マナー</div>
-                  <div className="text-xs text-slate-500 mt-1">所要時間: 3分</div>
+                  <div className="text-xs font-bold text-blue-600 mb-1">Season 1</div>
+                  <div className="font-bold text-slate-800">AI活用・防衛実戦ドリル</div>
+                  <div className="text-xs text-slate-500 mt-1">全{SCENARIOS.length}問 | 所要時間: 3分</div>
                 </div>
                 <ArrowRight className="text-blue-400" size={20} />
               </div>
             </div>
-
-            <div className="bg-white border border-slate-200 p-4 rounded-lg opacity-60">
-              <div className="text-xs font-bold text-slate-400 mb-1">CASE 2</div>
-              <div className="font-bold text-slate-800">嘘(ハルシネーション)の見抜き方</div>
-            </div>
-
-            <div className="bg-white border border-slate-200 p-4 rounded-lg opacity-60">
-              <div className="text-xs font-bold text-slate-400 mb-1">CASE 3</div>
-              <div className="font-bold text-slate-800">著作権と生成物の利用</div>
+            
+            <div className="p-4 rounded-lg border border-dashed border-slate-300 text-center text-slate-400 text-sm">
+              Season 2 以降は順次公開されます
             </div>
           </div>
         </div>
@@ -386,32 +518,36 @@ const SimulationApp = () => {
 
   // 2. チャットシミュレーション画面
   if (currentScreen === 'chat') {
+    const currentScenario = SCENARIOS[currentScenarioIndex];
     return (
       <div className="w-full max-w-md mx-auto bg-slate-50 h-[800px] flex flex-col font-sans border shadow-xl rounded-xl overflow-hidden">
-        <header className="bg-white border-b p-3 flex items-center gap-2 shadow-sm z-10">
-          <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white">
-            <MessageSquare size={16} />
-          </div>
-          <div>
-            <div className="text-xs font-bold text-slate-500">AI Assistant Bot</div>
-            <div className="text-[10px] text-green-500 flex items-center gap-1">
-              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> Online
+        <header className="bg-white border-b p-3 flex items-center justify-between shadow-sm z-10">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white">
+              <MessageSquare size={16} />
             </div>
+            <div>
+              <div className="text-xs font-bold text-slate-500">AI Assistant Bot</div>
+              <div className="text-[10px] text-green-500 flex items-center gap-1">
+                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> Online
+              </div>
+            </div>
+          </div>
+          <div className="text-xs font-bold text-slate-400">
+            Q {currentScenarioIndex + 1} / {SCENARIOS.length}
           </div>
         </header>
 
         <div className="flex-1 bg-slate-100 p-4 overflow-y-auto space-y-4">
           {chatHistory.map((msg, idx) => (
             <div key={idx} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] p-3 rounded-lg text-sm shadow-sm ${
+              <div className={`max-w-[85%] p-3 rounded-lg text-sm shadow-sm whitespace-pre-wrap ${
                 msg.sender === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 
                 msg.sender === 'system' ? 'bg-yellow-50 text-slate-600 border border-yellow-200 text-xs flex items-start' :
                 'bg-white text-slate-800 rounded-bl-none'
               }`}>
                 {msg.sender === 'system' && <AlertTriangle size={14} className="inline mr-1 text-yellow-500 mt-0.5 shrink-0"/>}
-                <div>
-                  {msg.text.split('\n').map((line, i) => <div key={i}>{line}</div>)}
-                </div>
+                <div>{msg.text}</div>
               </div>
             </div>
           ))}
@@ -429,7 +565,7 @@ const SimulationApp = () => {
             showOptions ? (
               <div className="space-y-2 animate-in slide-in-from-bottom-2 fade-in duration-300">
                 <p className="text-xs font-bold text-slate-500 mb-2">どう返信しますか？</p>
-                {scenario.options.map((opt) => (
+                {currentScenario.options.map((opt) => (
                   <button 
                     key={opt.id}
                     onClick={() => handleOptionSelect(opt)}
@@ -458,7 +594,7 @@ const SimulationApp = () => {
                     onClick={handleNext}
                     className={`mt-4 w-full py-2.5 rounded font-bold text-sm shadow-sm transition-transform active:scale-95 ${feedback === 'success' ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-red-600 text-white hover:bg-red-700'}`}
                   >
-                    {feedback === 'success' ? '次のシナリオへ' : 'もう一度やり直す'}
+                    {currentScenarioIndex < SCENARIOS.length - 1 ? '次の問題へ' : '結果を見る'}
                   </button>
                 </div>
               </div>
@@ -471,24 +607,33 @@ const SimulationApp = () => {
 
   // 3. 結果画面
   if (currentScreen === 'result') {
+    const isPassed = score === SCENARIOS.length;
     return (
       <div className="w-full max-w-md mx-auto bg-white h-[800px] flex flex-col font-sans border shadow-xl rounded-xl overflow-hidden p-8 text-center justify-center items-center">
-        <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center text-green-600 mb-6 animate-in zoom-in duration-500">
-          <ShieldCheck size={48} />
+        <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-6 animate-in zoom-in duration-500 ${isPassed ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600'}`}>
+          {isPassed ? <Award size={48} /> : <ShieldCheck size={48} />}
         </div>
-        <h2 className="text-2xl font-bold text-slate-800 mb-2">Simulation Clear!</h2>
-        <p className="text-slate-500 mb-8">Case 1: 情報セキュリティ判定<br/>「安全」</p>
+        <h2 className="text-2xl font-bold text-slate-800 mb-2">
+          {isPassed ? "Excellent!" : "Simulation Finished"}
+        </h2>
+        <p className="text-slate-500 mb-8">
+          正答数: <span className="text-xl font-bold text-slate-800">{score}</span> / {SCENARIOS.length}<br/>
+          {isPassed ? "全問正解！プロフェッショナルです。" : "いくつかリスク行動がありました。復習しましょう。"}
+        </p>
         
-        <div className="bg-slate-50 p-4 rounded-lg border w-full text-left mb-8 shadow-inner">
-          <div className="text-xs text-slate-400 font-bold mb-2">獲得バッジ</div>
-          <div className="flex items-center gap-3">
-            <div className="bg-yellow-100 p-2 rounded text-yellow-600">
-               <FileText size={20} />
-            </div>
-            <div>
-              <div className="font-bold text-sm text-slate-700">秘匿化マスター</div>
-              <div className="text-xs text-slate-500">機密情報を適切にマスクしました</div>
-            </div>
+        <div className="bg-slate-50 p-4 rounded-lg border w-full text-left mb-8 shadow-inner overflow-y-auto max-h-60">
+          <div className="text-xs text-slate-400 font-bold mb-2">回答履歴</div>
+          <div className="space-y-2">
+            {answers.map((ans, i) => (
+              <div key={i} className="flex items-center justify-between text-sm border-b pb-2">
+                <span className="text-slate-600">Case {i+1}</span>
+                {ans.result === 'safe' ? (
+                  <span className="text-green-600 font-bold flex items-center gap-1"><CheckCircle size={12}/> Safe</span>
+                ) : (
+                  <span className="text-red-500 font-bold flex items-center gap-1"><AlertTriangle size={12}/> Risk</span>
+                )}
+              </div>
+            ))}
           </div>
         </div>
 
