@@ -8,12 +8,10 @@ import {
   ArrowRight, 
   XCircle, 
   RefreshCw, 
-  FileText, 
   Loader2,
   LogIn,
   AlertCircle,
-  Award,
-  ChevronRight
+  Award
 } from 'lucide-react';
 
 // ▼▼▼ Firebase SDKの読み込み ▼▼▼
@@ -385,16 +383,10 @@ const SimulationApp = () => {
 
   const getFeedbackContent = (type: 'success' | 'danger') => {
     const currentScenario = SCENARIOS[currentScenarioIndex];
-    // 選んだ選択肢IDを取得したいが、簡易実装のためriskで判定してメッセージを表示
-    // 本来は選択したOptionオブジェクトをStateで保持すべき
-    // ここでは簡易的に「SafeならSafeの解説」「それ以外ならHigh/Mediumの解説（適当なもの）」を表示
     if (type === 'success') {
         const opt = currentScenario.options.find(o => o.risk === 'safe');
         return opt ? { title: opt.feedbackTitle, text: opt.feedbackText } : { title: '', text: '' };
     } else {
-        // 不正解の場合は、とりあえずHighのリスク解説を表示する（本来は選んだものに対応させる）
-        // UX向上のため、選んだ選択肢の解説を出すのがベスト
-        // ここでは便宜上、最初の非Safe選択肢の解説を表示
         const opt = currentScenario.options.find(o => o.risk !== 'safe'); 
         return opt ? { 
             title: opt.feedbackTitle,
