@@ -13,9 +13,7 @@ import {
   LogIn,
   AlertCircle,
   Award,
-  ChevronRight,
-  Zap,
-  Play
+  Zap
 } from 'lucide-react';
 
 // ▼▼▼ Firebase SDKの読み込み ▼▼▼
@@ -261,7 +259,7 @@ const SimulationApp = () => {
   // クイズ状態
   const [currentScenarioIndex, setCurrentScenarioIndex] = useState(0);
   const [score, setScore] = useState(0);
-  const [answers, setAnswers] = useState<{scenarioId: string, result: 'safe'|'medium'|'high'}[]>([]);
+  // 【修正】answersは未使用のため削除
 
   // 実践モード状態
   const [practiceInput, setPracticeInput] = useState("");
@@ -318,7 +316,7 @@ const SimulationApp = () => {
   const resetState = () => {
     setCurrentScenarioIndex(0);
     setScore(0);
-    setAnswers([]);
+    // answersステートのリセット処理も削除
     setPracticeInput("");
     setPracticeFeedback({status: null, message: ""});
   };
@@ -385,7 +383,7 @@ const SimulationApp = () => {
     if (option.risk === 'safe') {
       setScore(prev => prev + 1);
     }
-    setAnswers(prev => [...prev, { scenarioId: currentScenario.id, result: option.risk }]);
+    // answersへの追加処理を削除
 
     setTimeout(() => {
       if (option.risk === 'safe') {
