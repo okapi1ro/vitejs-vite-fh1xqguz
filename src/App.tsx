@@ -10,7 +10,8 @@ import {
   RefreshCw, 
   FileText, 
   Loader2,
-  LogIn
+  LogIn,
+  AlertCircle
 } from 'lucide-react';
 
 // ▼▼▼ Firebase SDKの読み込み ▼▼▼
@@ -24,26 +25,30 @@ const GAS_API_URL = "https://script.google.com/macros/s/AKfycbw6ac7EuSmc7sXrtArn
 // ▼▼▼ Firebaseの設定情報（Firebaseコンソールから取得して貼り付け） ▼▼▼
 // ※StackBlitzで試す場合は、ご自身のFirebaseプロジェクトの設定値を入れてください
 const firebaseConfig = {
-  apiKey: "AIzaSyA6FFOlrxIlp_njiJayYCbRdgLpQzvQLi8",
-  authDomain: "aidrilltest.firebaseapp.com",
-  projectId: "aidrilltest",
-  storageBucket: "aidrilltest.firebasestorage.app",
-  messagingSenderId: "781365045188",
-  appId: "1:781365045188:web:b971e424e499e6dae32691",
-  measurementId: "G-MM40DYXGF3"
-};
+    apiKey: "AIzaSyA6FFOlrxIlp_njiJayYCbRdgLpQzvQLi8",
+    authDomain: "aidrilltest.firebaseapp.com",
+    projectId: "aidrilltest",
+    storageBucket: "aidrilltest.firebasestorage.app",
+    messagingSenderId: "781365045188",
+    appId: "1:781365045188:web:b971e424e499e6dae32691",
+    measurementId: "G-MM40DYXGF3"
+  };
 
+// Firebase初期化状態
+let auth: any = null;
+let initError: string | null = null;
 
-// Firebase初期化（設定値がない場合はエラー回避のためダミーで初期化しない）
-let auth: any;
 try {
   // 設定値が書き換えられているかチェック
-  if (firebaseConfig.apiKey !== "YOUR_API_KEY") {
+  if (firebaseConfig.apiKey === "YOUR_API_KEY" || firebaseConfig.apiKey === "") {
+    initError = "Firebaseの設定が行われていません。コード内のfirebaseConfigを正しい値に書き換えてください。";
+  } else {
     const app = initializeApp(firebaseConfig);
     auth = getAuth(app);
   }
-} catch (e) {
+} catch (e: any) {
   console.error("Firebase initialization error:", e);
+  initError = `Firebase初期化エラー: ${e.message}`;
 }
 
 // 型定義
@@ -73,6 +78,7 @@ const SimulationApp = () => {
   const [user, setUser] = useState<User | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [currentScreen, setCurrentScreen] = useState<'login' | 'menu' | 'chat' | 'result'>('login');
+  const [loginError, setLoginError] = useState<string | null>(null);
   
   // チャット状態管理
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([
@@ -102,8 +108,9 @@ const SimulationApp = () => {
 
   // Googleログイン処理
   const handleLogin = async () => {
+    setLoginError(null);
     if (!auth) {
-      alert("Firebaseの設定が行われていません。コード内のfirebaseConfigを修正してください。");
+      setLoginError(initError || "Firebaseが初期化されていません。");
       return;
     }
     const provider = new GoogleAuthProvider();
@@ -112,7 +119,18 @@ const SimulationApp = () => {
       // 成功すると onAuthStateChanged が発火して画面遷移します
     } catch (error: any) {
       console.error("Login failed", error);
-      alert(`ログインに失敗しました: ${error.message}`);
+      // エラーメッセージの整形
+      let msg = "ログインに失敗しました。";
+      if (error.code === 'auth/popup-closed-by-user') {
+        msg = "ログイン画面が閉じられました。";
+      } else if (error.code === 'auth/cancelled-popup-request') {
+        msg = "ポップアップ処理が競合しています。もう一度お試しください。";
+      } else if (error.code === 'auth/popup-blocked') {
+        msg = "ポップアップがブロックされました。ブラウザの設定を確認してください。";
+      } else {
+        msg += ` (${error.message})`;
+      }
+      setLoginError(msg);
     }
   };
 
@@ -258,6 +276,14 @@ const SimulationApp = () => {
           （所要時間：約15分）
         </p>
         
+        {/* エラーメッセージ表示エリア */}
+        {(initError || loginError) && (
+          <div className="w-full bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700 flex items-start gap-2">
+            <AlertCircle size={16} className="mt-0.5 shrink-0" />
+            <div>{initError || loginError}</div>
+          </div>
+        )}
+
         {/* Googleログインボタン */}
         <button 
           onClick={handleLogin}
