@@ -16,39 +16,39 @@ import {
 
 // ▼▼▼ Firebase SDKの読み込み ▼▼▼
 import { initializeApp } from "firebase/app";
-import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User } from "firebase/auth";
+// 【修正点】Userを型としてインポートするために分割しました
+import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "firebase/auth";
+import type { User } from "firebase/auth";
 
 // ▼▼▼ ここにGoogle Apps Script (GAS) のURLを貼り付けます ▼▼▼
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbw6ac7EuSmc7sXrtArnnv9Bfbby1emCjIz-inoP1O1HbxhC5H_Ng4AjG77g5fbIGoWggg/exec"; 
-// 例: "https://script.google.com/macros/s/AKfycbx.../exec"
 
 // ▼▼▼ Firebaseの設定情報（Firebaseコンソールから取得して貼り付け） ▼▼▼
-// ※StackBlitzで試す場合は、ご自身のFirebaseプロジェクトの設定値を入れてください
 const firebaseConfig = {
-    apiKey: "AIzaSyA6FFOlrxIlp_njiJayYCbRdgLpQzvQLi8",
-    authDomain: "aidrilltest.firebaseapp.com",
-    projectId: "aidrilltest",
-    storageBucket: "aidrilltest.firebasestorage.app",
-    messagingSenderId: "781365045188",
-    appId: "1:781365045188:web:b971e424e499e6dae32691",
-    measurementId: "G-MM40DYXGF3"
-  };
+  apiKey: "AIzaSyA6FFOlrxIlp_njiJayYCbRdgLpQzvQLi8",
+  authDomain: "aidrilltest.firebaseapp.com",
+  projectId: "aidrilltest",
+  storageBucket: "aidrilltest.firebasestorage.app",
+  messagingSenderId: "781365045188",
+  appId: "1:781365045188:web:b971e424e499e6dae32691",
+  measurementId: "G-MM40DYXGF3"
+};
 
-// Firebase初期化状態
+// Firebase初期化状態管理
 let auth: any = null;
-let initError: string | null = null;
+let configError: string | null = null;
 
 try {
-  // 設定値が書き換えられているかチェック
+  // 設定値がダミーのままかチェック
   if (firebaseConfig.apiKey === "YOUR_API_KEY" || firebaseConfig.apiKey === "") {
-    initError = "Firebaseの設定が行われていません。コード内のfirebaseConfigを正しい値に書き換えてください。";
+    configError = "Firebaseの設定が行われていません。ソースコード内の 'firebaseConfig' を正しい値に書き換えてください。";
   } else {
     const app = initializeApp(firebaseConfig);
     auth = getAuth(app);
   }
 } catch (e: any) {
   console.error("Firebase initialization error:", e);
-  initError = `Firebase初期化エラー: ${e.message}`;
+  configError = `Firebase初期化エラー: ${e.message}`;
 }
 
 // 型定義
@@ -90,10 +90,13 @@ const SimulationApp = () => {
 
   // ログイン状態の監視
   useEffect(() => {
-    if (!auth) {
+    // 設定エラーがある場合、ローディングを終了してログイン画面（エラー表示）に留まる
+    if (configError || !auth) {
       setLoadingAuth(false);
+      setCurrentScreen('login');
       return;
     }
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoadingAuth(false);
@@ -110,7 +113,7 @@ const SimulationApp = () => {
   const handleLogin = async () => {
     setLoginError(null);
     if (!auth) {
-      setLoginError(initError || "Firebaseが初期化されていません。");
+      setLoginError(configError || "Firebaseが初期化されていません。");
       return;
     }
     const provider = new GoogleAuthProvider();
@@ -119,7 +122,6 @@ const SimulationApp = () => {
       // 成功すると onAuthStateChanged が発火して画面遷移します
     } catch (error: any) {
       console.error("Login failed", error);
-      // エラーメッセージの整形
       let msg = "ログインに失敗しました。";
       if (error.code === 'auth/popup-closed-by-user') {
         msg = "ログイン画面が閉じられました。";
@@ -127,6 +129,10 @@ const SimulationApp = () => {
         msg = "ポップアップ処理が競合しています。もう一度お試しください。";
       } else if (error.code === 'auth/popup-blocked') {
         msg = "ポップアップがブロックされました。ブラウザの設定を確認してください。";
+      } else if (error.code === 'auth/operation-not-allowed') {
+        msg = "Googleログインが有効になっていません。Firebase ConsoleでAuthentication設定を確認してください。";
+      } else if (error.code === 'auth/unauthorized-domain') {
+        msg = "このドメイン（localhost/stackblitz/vercel）からのアクセスが許可されていません。Firebase Consoleで承認済みドメインに追加してください。";
       } else {
         msg += ` (${error.message})`;
       }
@@ -276,11 +282,14 @@ const SimulationApp = () => {
           （所要時間：約15分）
         </p>
         
-        {/* エラーメッセージ表示エリア */}
-        {(initError || loginError) && (
+        {/* 設定エラー表示エリア */}
+        {(configError || loginError) && (
           <div className="w-full bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700 flex items-start gap-2">
             <AlertCircle size={16} className="mt-0.5 shrink-0" />
-            <div>{initError || loginError}</div>
+            <div>
+              <p className="font-bold">設定エラー</p>
+              <p>{configError || loginError}</p>
+            </div>
           </div>
         )}
 
@@ -298,13 +307,15 @@ const SimulationApp = () => {
           Googleアカウントでログイン
         </button>
 
-        {/* 開発中用のデバッグボタン */}
-        <button 
-          onClick={() => setCurrentScreen('menu')}
-          className="text-xs text-slate-400 mt-4 underline hover:text-slate-600"
-        >
-          [デバッグ用] ログインせずに進む
-        </button>
+        {/* 開発中用のデバッグボタン（設定未完了時のみ表示） */}
+        {configError && (
+          <button 
+            onClick={() => setCurrentScreen('menu')}
+            className="text-xs text-slate-400 mt-4 underline hover:text-slate-600"
+          >
+            [デバッグ用] ログインせずに進む
+          </button>
+        )}
       </div>
     );
   }
